@@ -17,9 +17,9 @@ class MiApp extends StatelessWidget {
       title: 'inalambra',
       theme: ThemeData(
         colorScheme: .fromSeed(seedColor: Colors.deepOrange),
+        fontFamily: 'Roboto',
       ),
       home: PaginaInicio(titulo: 'inalambra'),
-
     );
   }
 }
@@ -34,12 +34,8 @@ class PaginaInicio extends StatefulWidget {
   State<PaginaInicio> createState() => _EstadoPaginaInicio();
 }
 
-
-
 class _EstadoPaginaInicio extends State<PaginaInicio> {
-
   int indiceActualPagina = 0;
-
 
   @override
   Widget build(BuildContext context) {
@@ -56,31 +52,28 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
           });
         },
         destinations: const <Widget>[
-        NavigationDestination(icon: Icon(Icons.home), label: 'inicio'),
-        NavigationDestination(icon: Icon(Icons.info), label: 'info'),
-      ],
+          NavigationDestination(icon: Icon(Icons.home), label: 'inicio'),
+          NavigationDestination(icon: Icon(Icons.info), label: 'info'),
+        ],
       ),
       body: <Widget>[
-         Center(
+        Center(
+          child: Column(
+            mainAxisAlignment: .center,
+            children: [const Text('hola!')],
+          ),
+        ),
+        Center(
           child: Column(
             mainAxisAlignment: .center,
             children: [
-              const Text('hola!'),
+              const Text('app desarrollada por piruetas'),
+              const Text('en santiago de chile'),
+              const Text('febrero 2026'),
             ],
           ),
-         ),
-      Center(
-        child: Column(
-          mainAxisAlignment: .center,
-          children: [
-            const Text('app desarrollada por piruetas'),
-            const Text('en santiago de chile'),
-            const Text('febrero 2026'),
-          ],
         ),
-      ),
       ][indiceActualPagina],
     );
   }
 }
-
