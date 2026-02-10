@@ -18,7 +18,8 @@ class MiApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: .fromSeed(seedColor: Colors.deepOrange),
       ),
-      home: const PaginaInicio(titulo: 'inalambra'),
+      home: PaginaInicio(titulo: 'inalambra'),
+
     );
   }
 }
@@ -37,6 +38,8 @@ class PaginaInicio extends StatefulWidget {
 
 class _EstadoPaginaInicio extends State<PaginaInicio> {
 
+  int indiceActualPagina = 0;
+
 
   @override
   Widget build(BuildContext context) {
@@ -45,17 +48,39 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.titulo),
       ),
-      body: Center(
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: indiceActualPagina,
+        onDestinationSelected: (int indice) {
+          setState(() {
+            indiceActualPagina = indice;
+          });
+        },
+        destinations: const <Widget>[
+        NavigationDestination(icon: Icon(Icons.home), label: 'inicio'),
+        NavigationDestination(icon: Icon(Icons.info), label: 'info'),
+      ],
+      ),
+      body: <Widget>[
+         Center(
+          child: Column(
+            mainAxisAlignment: .center,
+            children: [
+              const Text('hola!'),
+            ],
+          ),
+         ),
+      Center(
         child: Column(
           mainAxisAlignment: .center,
           children: [
-            const Text('app desarrollada por piruetas',
-           ),
+            const Text('app desarrollada por piruetas'),
             const Text('en santiago de chile'),
             const Text('febrero 2026'),
           ],
         ),
       ),
+      ][indiceActualPagina],
     );
   }
 }
+
