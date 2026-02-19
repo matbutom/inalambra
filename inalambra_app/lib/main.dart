@@ -71,6 +71,8 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
         destinations: const <Widget>[
           NavigationDestination(icon: Icon(Icons.home), label: 'inicio'),
           NavigationDestination(icon: Icon(Icons.computer), label: 'servidor'),
+          NavigationDestination(icon: Icon(Icons.send), label: 'enviar'),
+          NavigationDestination(icon: Icon(Icons.inbox), label: 'recibir'),
           NavigationDestination(icon: Icon(Icons.info), label: 'info'),
         ],
       ),
@@ -149,6 +151,12 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
             ),
           ],
         ),
+
+        // enviar
+        Column(children: [],),
+
+        // recibir
+        Column(children: [],),
 
         // info
         Center(
