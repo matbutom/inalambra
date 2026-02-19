@@ -1,6 +1,8 @@
 // bibliotecas
 
 import 'piruetas.dart';
+import 'widgets/info.dart';
+
 // import 'dart:io';
 // import 'dart:async';
 // import 'package:csv/csv.dart';
@@ -454,26 +456,9 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
             ),
           ],
         ),
+        WidgetInfo(),
 
         // info
-        Center(
-          child: Column(
-            mainAxisAlignment: .center,
-            children: [
-              const Spacer(),
-              TextoCentrado('inalambra'),
-              TextoCentrado('v${widget.v}'),
-              TextoCentrado(widget.agno.toString()),
-              TextoCentrado('app desarrollada por piruetas'),
-              TextoCentrado('en santiago de chile'),
-              TextoCentrado('iniciada para el curso'),
-              TextoCentrado('dis9079 interacciones inalámbricas'),
-              TextoCentrado('dictado en diseño udp 2026'),
-              TextoCentrado('por aarón montoya y mateo arce'),
-              const Spacer(),
-            ],
-          ),
-        ),
       ][indiceActualPagina],
     );
   }
