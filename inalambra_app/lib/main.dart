@@ -4,11 +4,10 @@
 import 'widgets/recibir.dart';
 import 'widgets/info.dart';
 
-// import 'dart:io';
-// import 'dart:async';
-// import 'package:csv/csv.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
-// import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_server_client.dart';
 
 void main() {
   runApp(const MiApp());
@@ -17,13 +16,12 @@ void main() {
 class MiApp extends StatelessWidget {
   const MiApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'inalambra',
       theme: ThemeData(
-        colorScheme: .fromSeed(seedColor: Colors.deepOrange),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
         fontFamily: 'Roboto',
       ),
       home: PaginaInicio(titulo: 'inalambra', v: '0.0.1', agno: 2026),
@@ -51,17 +49,21 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
   int indiceActualPagina = 0;
 
   final List<String> servidores = [
+    'localhost',
     'broker.hivemq.com',
     'test.mosquitto.org',
     'mqtt.eclipseprojects.io',
   ];
   int? servidorSeleccionado;
   bool conectado = false;
+  MqttServerClient? _mqttClient;
+  final _recibirKey = GlobalKey<WidgetRecibirState>();
 
   final TextEditingController _idController = TextEditingController();
   final TextEditingController _contrasenaController = TextEditingController();
   bool _sesionIniciada = false;
   String _idUsuario = '';
+  String _contrasena = '';
 
   static const List<Map<String, String>> _mensajes = [
     {'etiqueta': 'encender led', 'componente': 'led', 'icono': 'light'},
@@ -80,8 +82,77 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
   final TextEditingController _mensajeManualController =
       TextEditingController();
 
+  // MQTT
+
+  Future<void> _conectar() async {
+    if (servidorSeleccionado == null) return;
+    final servidor = servidores[servidorSeleccionado!];
+    final clientId = _sesionIniciada ? _idUsuario : 'inalambra';
+
+    _mqttClient = MqttServerClient(servidor, clientId);
+    _mqttClient!.port = 1883;
+    _mqttClient!.keepAlivePeriod = 60;
+    _mqttClient!.logging(on: false);
+    _mqttClient!.onConnected = _onConectado;
+    _mqttClient!.onDisconnected = _onDesconectado;
+
+    try {
+      await _mqttClient!.connect(
+        _sesionIniciada ? _idUsuario : null,
+        _sesionIniciada ? _contrasena : null,
+      );
+    } catch (e) {
+      _mqttClient!.disconnect();
+      setState(() { conectado = false; });
+    }
+  }
+
+  void _desconectar() {
+    _mqttClient?.disconnect();
+    _mqttClient = null;
+    setState(() { conectado = false; });
+  }
+
+  void _onConectado() {
+    setState(() { conectado = true; });
+    _mqttClient!.subscribe('dis9079/#', MqttQos.atMostOnce);
+    _mqttClient!.updates!.listen(_onMensajeRecibido);
+  }
+
+  void _onDesconectado() {
+    setState(() { conectado = false; });
+  }
+
+  void _onMensajeRecibido(List<MqttReceivedMessage<MqttMessage>> messages) {
+    final now = DateTime.now();
+    final hora = '${now.hour}:${now.minute.toString().padLeft(2, '0')}';
+    for (final msg in messages) {
+      final recMsg = msg.payload as MqttPublishMessage;
+      final payload = MqttPublishPayload.bytesToStringAsString(
+          recMsg.payload.message);
+      final topicParts = msg.topic.split('/');
+      final componente =
+          topicParts.length > 1 ? topicParts.last : 'otros';
+      _recibirKey.currentState?.agregarMensaje({
+        'contenido': payload,
+        'componente': componente,
+        'hora': hora,
+      });
+    }
+  }
+
+  void _publicar(String topic, String mensaje) {
+    if (_mqttClient == null ||
+        _mqttClient!.connectionStatus!.state !=
+            MqttConnectionState.connected) return;
+    final builder = MqttClientPayloadBuilder();
+    builder.addString(mensaje);
+    _mqttClient!.publishMessage(topic, MqttQos.atMostOnce, builder.payload!);
+  }
+
   @override
   void dispose() {
+    _mqttClient?.disconnect();
     _idController.dispose();
     _contrasenaController.dispose();
     _mensajeManualController.dispose();
@@ -117,7 +188,7 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
             padding: const EdgeInsets.symmetric(horizontal: 32),
             child: _sesionIniciada
                 ? Column(
-                    mainAxisAlignment: .center,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const Icon(Icons.person, size: 64),
                       const SizedBox(height: 16),
@@ -128,6 +199,7 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
                           setState(() {
                             _sesionIniciada = false;
                             _idUsuario = '';
+                            _contrasena = '';
                             _idController.clear();
                             _contrasenaController.clear();
                           });
@@ -137,7 +209,7 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
                     ],
                   )
                 : Column(
-                    mainAxisAlignment: .center,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const Text('iniciar sesión'),
                       const SizedBox(height: 32),
@@ -167,6 +239,7 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
                             setState(() {
                               _sesionIniciada = true;
                               _idUsuario = _idController.text;
+                              _contrasena = _contrasenaController.text;
                             });
                           }
                         },
@@ -184,9 +257,11 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
               onChanged: servidorSeleccionado == null
                   ? null
                   : (bool valor) {
-                      setState(() {
-                        conectado = valor;
-                      });
+                      if (valor) {
+                        _conectar();
+                      } else {
+                        _desconectar();
+                      }
                     },
               title: Text(conectado ? 'conectado' : 'desconectado'),
               subtitle: servidorSeleccionado != null
@@ -233,12 +308,12 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
             child: Column(
-              mainAxisAlignment: .center,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Text('enviar mensaje'),
                 const SizedBox(height: 32),
                 DropdownButtonFormField<String>(
-                  initialValue: _mensajeSeleccionado,
+                  value: _mensajeSeleccionado,
                   decoration: const InputDecoration(
                     labelText: 'tipo de mensaje',
                     border: OutlineInputBorder(),
@@ -261,12 +336,14 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
                   onPressed: (_mensajeSeleccionado == null || !conectado)
                       ? null
                       : () {
-                          final componente = _mensajes.firstWhere(
+                          final m = _mensajes.firstWhere(
                             (m) => m['etiqueta'] == _mensajeSeleccionado,
-                          )['componente']!;
+                          );
+                          final componente = m['componente']!;
                           final servidor = servidorSeleccionado != null
                               ? servidores[servidorSeleccionado!]
                               : '';
+                          _publicar('dis9079/$componente', _mensajeSeleccionado!);
                           setState(() {
                             _ultimoEnvio =
                                 '$_mensajeSeleccionado → $componente\nvía $servidor';
@@ -296,18 +373,20 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
                 ElevatedButton.icon(
                   onPressed:
                       (_mensajeManualController.text.trim().isEmpty ||
-                          !conectado)
-                      ? null
-                      : () {
-                          final servidor = servidorSeleccionado != null
-                              ? servidores[servidorSeleccionado!]
-                              : '';
-                          setState(() {
-                            _ultimoEnvio =
-                                '"${_mensajeManualController.text.trim()}"\nvía $servidor';
-                            _mensajeManualController.clear();
-                          });
-                        },
+                              !conectado)
+                          ? null
+                          : () {
+                              final servidor = servidorSeleccionado != null
+                                  ? servidores[servidorSeleccionado!]
+                                  : '';
+                              final texto =
+                                  _mensajeManualController.text.trim();
+                              _publicar('dis9079/mensaje', texto);
+                              setState(() {
+                                _ultimoEnvio = '"$texto"\nvía $servidor';
+                                _mensajeManualController.clear();
+                              });
+                            },
                   icon: const Icon(Icons.send),
                   label: const Text('enviar mensaje'),
                 ),
@@ -337,7 +416,7 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
-                              crossAxisAlignment: .start,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Text('mensaje enviado'),
                                 const SizedBox(height: 4),
@@ -354,11 +433,10 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
             ),
           ),
         ),
-        WidgetRecibir(conectado),
+
+        WidgetRecibir(conectado, key: _recibirKey),
 
         WidgetInfo(),
-
-        // info
       ][indiceActualPagina],
     );
   }

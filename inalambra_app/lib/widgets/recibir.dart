@@ -6,12 +6,18 @@ class WidgetRecibir extends StatefulWidget {
   const WidgetRecibir(this.conectado, {super.key});
 
   @override
-  State<WidgetRecibir> createState() => _WidgetRecibirState();
+  State<WidgetRecibir> createState() => WidgetRecibirState();
 }
 
-class _WidgetRecibirState extends State<WidgetRecibir> {
+class WidgetRecibirState extends State<WidgetRecibir> {
   final List<Map<String, String>> _mensajesRecibidos = [];
   String _filtroRecibidos = 'todos';
+
+  void agregarMensaje(Map<String, String> msg) {
+    setState(() {
+      _mensajesRecibidos.add(msg);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
