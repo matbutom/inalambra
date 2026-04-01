@@ -77,7 +77,7 @@ class WidgetRecibirState extends State<WidgetRecibir> {
                       Text(
                         widget.conectado
                             ? 'esperando mensajes...'
-                            : 'conéctate a un servidor primero',
+                            : 'inicia el socket primero',
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.outline,
                         ),

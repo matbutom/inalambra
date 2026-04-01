@@ -3,11 +3,10 @@
 // import 'piruetas.dart';
 import 'widgets/recibir.dart';
 import 'widgets/info.dart';
+import 'services/osc_service.dart';
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:mqtt_client/mqtt_client.dart';
-import 'package:mqtt_client/mqtt_server_client.dart';
 
 void main() {
   runApp(const MiApp());
@@ -48,22 +47,26 @@ class PaginaInicio extends StatefulWidget {
 class _EstadoPaginaInicio extends State<PaginaInicio> {
   int indiceActualPagina = 0;
 
-  final List<String> servidores = [
-    'localhost',
-    'broker.hivemq.com',
-    'test.mosquitto.org',
-    'mqtt.eclipseprojects.io',
-  ];
-  int? servidorSeleccionado;
-  bool conectado = false;
-  MqttServerClient? _mqttClient;
+  // OSC: sin broker — configuración de IP y puertos UDP
+  final TextEditingController _hostController = TextEditingController(
+    text: '192.168.1.100',
+  );
+  final TextEditingController _puertoRemotoController = TextEditingController(
+    text: '57120',
+  );
+  final TextEditingController _puertoLocalController = TextEditingController(
+    text: '57121',
+  );
+
+  EstadoOsc _estadoOsc = EstadoOsc.inactivo;
+  OscService? _oscService;
+  StreamSubscription<OscMessage>? _subscription;
   final _recibirKey = GlobalKey<WidgetRecibirState>();
 
   final TextEditingController _idController = TextEditingController();
   final TextEditingController _contrasenaController = TextEditingController();
   bool _sesionIniciada = false;
   String _idUsuario = '';
-  String _contrasena = '';
 
   static const List<Map<String, String>> _mensajes = [
     {'etiqueta': 'encender led', 'componente': 'led', 'icono': 'light'},
@@ -82,77 +85,75 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
   final TextEditingController _mensajeManualController =
       TextEditingController();
 
-  // MQTT
+  // OSC
 
-  Future<void> _conectar() async {
-    if (servidorSeleccionado == null) return;
-    final servidor = servidores[servidorSeleccionado!];
-    final clientId = _sesionIniciada ? _idUsuario : 'inalambra';
+  Future<void> _iniciar() async {
+    final host = _hostController.text.trim();
+    if (host.isEmpty) return;
+    final remotePort =
+        int.tryParse(_puertoRemotoController.text.trim()) ?? 57120;
+    final localPort =
+        int.tryParse(_puertoLocalController.text.trim()) ?? 57121;
 
-    _mqttClient = MqttServerClient(servidor, clientId);
-    _mqttClient!.port = 1883;
-    _mqttClient!.keepAlivePeriod = 60;
-    _mqttClient!.logging(on: false);
-    _mqttClient!.onConnected = _onConectado;
-    _mqttClient!.onDisconnected = _onDesconectado;
+    _oscService = OscService(
+      remoteHost: host,
+      remotePort: remotePort,
+      localPort: localPort,
+    );
 
     try {
-      await _mqttClient!.connect(
-        _sesionIniciada ? _idUsuario : null,
-        _sesionIniciada ? _contrasena : null,
-      );
+      await _oscService!.init();
+      setState(() {
+        _estadoOsc = EstadoOsc.listo;
+      });
+      _subscription = _oscService!.messages.listen(_onMensajeRecibido);
     } catch (e) {
-      _mqttClient!.disconnect();
-      setState(() { conectado = false; });
-    }
-  }
-
-  void _desconectar() {
-    _mqttClient?.disconnect();
-    _mqttClient = null;
-    setState(() { conectado = false; });
-  }
-
-  void _onConectado() {
-    setState(() { conectado = true; });
-    _mqttClient!.subscribe('dis9079/#', MqttQos.atMostOnce);
-    _mqttClient!.updates!.listen(_onMensajeRecibido);
-  }
-
-  void _onDesconectado() {
-    setState(() { conectado = false; });
-  }
-
-  void _onMensajeRecibido(List<MqttReceivedMessage<MqttMessage>> messages) {
-    final now = DateTime.now();
-    final hora = '${now.hour}:${now.minute.toString().padLeft(2, '0')}';
-    for (final msg in messages) {
-      final recMsg = msg.payload as MqttPublishMessage;
-      final payload = MqttPublishPayload.bytesToStringAsString(
-          recMsg.payload.message);
-      final topicParts = msg.topic.split('/');
-      final componente =
-          topicParts.length > 1 ? topicParts.last : 'otros';
-      _recibirKey.currentState?.agregarMensaje({
-        'contenido': payload,
-        'componente': componente,
-        'hora': hora,
+      _oscService!.dispose();
+      _oscService = null;
+      setState(() {
+        _estadoOsc = EstadoOsc.error;
       });
     }
   }
 
-  void _publicar(String topic, String mensaje) {
-    if (_mqttClient == null ||
-        _mqttClient!.connectionStatus!.state !=
-            MqttConnectionState.connected) return;
-    final builder = MqttClientPayloadBuilder();
-    builder.addString(mensaje);
-    _mqttClient!.publishMessage(topic, MqttQos.atMostOnce, builder.payload!);
+  void _detener() {
+    _subscription?.cancel();
+    _subscription = null;
+    _oscService?.dispose();
+    _oscService = null;
+    setState(() {
+      _estadoOsc = EstadoOsc.inactivo;
+    });
+  }
+
+  void _onMensajeRecibido(OscMessage msg) {
+    final now = DateTime.now();
+    final hora = '${now.hour}:${now.minute.toString().padLeft(2, '0')}';
+    // componente = última parte de la dirección OSC (ej: /dis9079/led → led)
+    final parts = msg.address.split('/');
+    final componente = parts.isNotEmpty ? parts.last : 'otros';
+    final contenido = msg.arguments.isNotEmpty
+        ? msg.arguments.first.toString()
+        : msg.address;
+    _recibirKey.currentState?.agregarMensaje({
+      'contenido': contenido,
+      'componente': componente,
+      'hora': hora,
+    });
+  }
+
+  void _enviar(String address, List<dynamic> args) {
+    if (_oscService == null || _estadoOsc != EstadoOsc.listo) return;
+    _oscService!.send(OscMessage(address, args));
   }
 
   @override
   void dispose() {
-    _mqttClient?.disconnect();
+    _subscription?.cancel();
+    _oscService?.dispose();
+    _hostController.dispose();
+    _puertoRemotoController.dispose();
+    _puertoLocalController.dispose();
     _idController.dispose();
     _contrasenaController.dispose();
     _mensajeManualController.dispose();
@@ -175,7 +176,10 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
         },
         destinations: const <Widget>[
           NavigationDestination(icon: Icon(Icons.home), label: 'inicio'),
-          NavigationDestination(icon: Icon(Icons.computer), label: 'servidor'),
+          NavigationDestination(
+            icon: Icon(Icons.wifi),
+            label: 'destino',
+          ),
           NavigationDestination(icon: Icon(Icons.send), label: 'enviar'),
           NavigationDestination(icon: Icon(Icons.inbox), label: 'recibir'),
           NavigationDestination(icon: Icon(Icons.info), label: 'info'),
@@ -199,7 +203,6 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
                           setState(() {
                             _sesionIniciada = false;
                             _idUsuario = '';
-                            _contrasena = '';
                             _idController.clear();
                             _contrasenaController.clear();
                           });
@@ -239,7 +242,6 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
                             setState(() {
                               _sesionIniciada = true;
                               _idUsuario = _idController.text;
-                              _contrasena = _contrasenaController.text;
                             });
                           }
                         },
@@ -249,55 +251,84 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
                   ),
           ),
         ),
-        // servidor
+
+        // destino - configuración OSC UDP
         Column(
           children: [
             SwitchListTile(
-              value: conectado,
-              onChanged: servidorSeleccionado == null
+              value: _estadoOsc == EstadoOsc.listo,
+              onChanged: _hostController.text.trim().isEmpty
                   ? null
                   : (bool valor) {
                       if (valor) {
-                        _conectar();
+                        _iniciar();
                       } else {
-                        _desconectar();
+                        _detener();
                       }
                     },
-              title: Text(conectado ? 'conectado' : 'desconectado'),
-              subtitle: servidorSeleccionado != null
-                  ? Text(servidores[servidorSeleccionado!])
-                  : const Text('selecciona un servidor'),
+              title: Text(
+                _estadoOsc == EstadoOsc.listo
+                    ? 'listo'
+                    : _estadoOsc == EstadoOsc.error
+                    ? 'error al abrir socket'
+                    : 'inactivo',
+              ),
+              subtitle: _hostController.text.trim().isEmpty
+                  ? const Text('ingresa una IP destino')
+                  : Text(
+                      '${_hostController.text.trim()}:${_puertoRemotoController.text}',
+                    ),
               secondary: Icon(
-                conectado ? Icons.wifi : Icons.wifi_off,
-                color: conectado
+                _estadoOsc == EstadoOsc.listo ? Icons.wifi : Icons.wifi_off,
+                color: _estadoOsc == EstadoOsc.listo
                     ? Theme.of(context).colorScheme.primary
                     : Theme.of(context).colorScheme.outline,
               ),
             ),
             const Divider(),
-            Expanded(
-              child: ListView.builder(
-                itemCount: servidores.length,
-                itemBuilder: (context, i) {
-                  final seleccionado = servidorSeleccionado == i;
-                  return ListTile(
-                    leading: Icon(
-                      Icons.computer,
-                      color: seleccionado
-                          ? Theme.of(context).colorScheme.primary
-                          : null,
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _hostController,
+                    decoration: const InputDecoration(
+                      labelText: 'IP destino',
+                      hintText: '192.168.1.100',
+                      prefixIcon: Icon(Icons.computer),
+                      border: OutlineInputBorder(),
                     ),
-                    title: Text(servidores[i]),
-                    selected: seleccionado,
-                    selectedColor: Theme.of(context).colorScheme.primary,
-                    onTap: () {
-                      setState(() {
-                        servidorSeleccionado = i;
-                        conectado = false;
-                      });
-                    },
-                  );
-                },
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _puertoRemotoController,
+                          decoration: const InputDecoration(
+                            labelText: 'puerto remoto',
+                            hintText: '57120',
+                            border: OutlineInputBorder(),
+                          ),
+                          keyboardType: TextInputType.number,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: _puertoLocalController,
+                          decoration: const InputDecoration(
+                            labelText: 'puerto local',
+                            hintText: '57121',
+                            border: OutlineInputBorder(),
+                          ),
+                          keyboardType: TextInputType.number,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ],
@@ -333,22 +364,26 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton.icon(
-                  onPressed: (_mensajeSeleccionado == null || !conectado)
-                      ? null
-                      : () {
-                          final m = _mensajes.firstWhere(
-                            (m) => m['etiqueta'] == _mensajeSeleccionado,
-                          );
-                          final componente = m['componente']!;
-                          final servidor = servidorSeleccionado != null
-                              ? servidores[servidorSeleccionado!]
-                              : '';
-                          _publicar('dis9079/$componente', _mensajeSeleccionado!);
-                          setState(() {
-                            _ultimoEnvio =
-                                '$_mensajeSeleccionado → $componente\nvía $servidor';
-                          });
-                        },
+                  onPressed:
+                      (_mensajeSeleccionado == null ||
+                              _estadoOsc != EstadoOsc.listo)
+                          ? null
+                          : () {
+                              final m = _mensajes.firstWhere(
+                                (m) => m['etiqueta'] == _mensajeSeleccionado,
+                              );
+                              final componente = m['componente']!;
+                              // OSC: dirección /dis9079/<componente>, argumento = etiqueta
+                              _enviar(
+                                '/dis9079/$componente',
+                                [_mensajeSeleccionado!],
+                              );
+                              setState(() {
+                                _ultimoEnvio =
+                                    '$_mensajeSeleccionado → /dis9079/$componente'
+                                    '\nvía ${_hostController.text.trim()}';
+                              });
+                            },
                   icon: const Icon(Icons.send),
                   label: const Text('enviar'),
                 ),
@@ -373,28 +408,28 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
                 ElevatedButton.icon(
                   onPressed:
                       (_mensajeManualController.text.trim().isEmpty ||
-                              !conectado)
+                              _estadoOsc != EstadoOsc.listo)
                           ? null
                           : () {
-                              final servidor = servidorSeleccionado != null
-                                  ? servidores[servidorSeleccionado!]
-                                  : '';
                               final texto =
                                   _mensajeManualController.text.trim();
-                              _publicar('dis9079/mensaje', texto);
+                              // OSC: mensajes de texto libre en /dis9079/mensaje
+                              _enviar('/dis9079/mensaje', [texto]);
                               setState(() {
-                                _ultimoEnvio = '"$texto"\nvía $servidor';
+                                _ultimoEnvio =
+                                    '"$texto"'
+                                    '\nvía ${_hostController.text.trim()}';
                                 _mensajeManualController.clear();
                               });
                             },
                   icon: const Icon(Icons.send),
                   label: const Text('enviar mensaje'),
                 ),
-                if (!conectado)
+                if (_estadoOsc != EstadoOsc.listo)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(
-                      'conéctate a un servidor primero',
+                      'inicia el socket primero',
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.outline,
                         fontSize: 12,
@@ -434,7 +469,7 @@ class _EstadoPaginaInicio extends State<PaginaInicio> {
           ),
         ),
 
-        WidgetRecibir(conectado, key: _recibirKey),
+        WidgetRecibir(_estadoOsc == EstadoOsc.listo, key: _recibirKey),
 
         WidgetInfo(),
       ][indiceActualPagina],
